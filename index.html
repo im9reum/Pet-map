@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>반려동물 동반 업소 리스트</title>
+    <style>
+        :root { --naver-green: #03C75A; }
+        body { font-family: 'Pretendard', -apple-system, sans-serif; padding: 15px; background-color: #f8f9fa; color: #333; margin: 0; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+        h1 { text-align: center; font-size: 1.3rem; margin-bottom: 20px; word-break: keep-all; }
+        .total-badge { font-size: 0.9rem; color: #666; font-weight: normal; }
+
+        .control-panel { position: sticky; top: 0; background: white; padding: 10px 0; z-index: 10; border-bottom: 1px solid #eee; }
+        .search-box { display: flex; gap: 8px; margin-bottom: 10px; }
+        #search-input { flex: 1; padding: 12px; border-radius: 8px; border: 2px solid #eee; font-size: 15px; }
+        #search-input:focus { border-color: var(--naver-green); outline: none; }
+        
+        .btn-group { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 5px; }
+        .btn { padding: 10px 15px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; font-size: 13px; white-space: nowrap; transition: 0.2s; }
+        .btn-primary { background: var(--naver-green); color: white; }
+        .btn-secondary { background: #eef0f2; color: #555; }
+
+        .table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        table { width: 100%; border-collapse: collapse; min-width: 600px; }
+        th, td { padding: 12px 8px; border-bottom: 1px solid #f2f2f2; text-align: left; font-size: 14px; }
+        th { background: #fafafa; color: #777; font-weight: 600; }
+
+        .map-link { display: inline-block; padding: 6px 12px; background: var(--naver-green); color: white; text-decoration: none; border-radius: 5px; font-size: 12px; font-weight: bold; white-space: nowrap; }
+        .distance-info { font-size: 11px; color: #ff6b6b; display: block; margin-top: 4px; font-weight: bold; }
+        #status { text-align: center; padding: 50px; color: #999; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🐾 반려동물 동반 가능 업소 <span id="total-count" class="total-badge"></span></h1>
+
+    <div class="control-panel">
+        <div class="search-box">
+            <input type="text" id="search-input" placeholder="업소명 또는 지역 검색..." onkeypress="if(event.keyCode==13) filterData()">
+            <button class="btn btn-primary" onclick="filterData()">검색</button>
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-secondary" onclick="sortByDistance()">내 위치 중심 정렬</button>
+            <button class="btn btn-secondary" onclick="filterByRadius(10)">주변 10km 이내</button>
+            <button class="btn btn-secondary" onclick="resetList()">전체 초기화</button>
+        </div>
+    </div>
+
+    <div id="status">데이터를 불러오는 중입니다...</div>
+    
+    <div class="table-wrapper">
+        <table id="data-table" style="display:none;">
+            <thead>
+                <tr>
+                    <th>업소명</th>
+                    <th>주소</th>
+                    <th>전화번호</th>
+                    <th style="width: 80px;">위치</th>
+                </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // 본인의 앱스 스크립트 URL을 입력하세요
+    const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwvf0VYMTL_w42xuQl3ZhM0na7a6joulYW95sEYvTGDGTJuBL-SwMWdprtfTgOjjMjzzA/exec';
+    
+    let masterData = []; 
+    let userCoords = null;
+
+    function getDistance(lat1, lon1, lat2, lon2) {
+        if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    async function getUserLocation() {
+        return new Promise((resolve) => {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(pos => {
+                    userCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                    resolve(true);
+                }, () => { alert("위치 권한을 허용해야 거리 계산이 가능합니다."); resolve(false); });
+            } else { resolve(false); }
+        });
+    }
+
+    async function loadData() {
+        try {
+            const response = await fetch(WEB_APP_URL);
+            const rawData = await response.json();
+
+            // 💡 [수정] 폐업일 헤더를 참조하여 필터링
+            masterData = rawData.filter(row => {
+                const clsbiz = (row["폐업일"] || "").toString().trim();
+                return clsbiz === ""; 
+            });
+
+            document.getElementById('total-count').innerText = `(${masterData.length}개)`;
+            renderTable(masterData);
+            document.getElementById('status').style.display = 'none';
+            document.getElementById('data-table').style.display = 'table';
+        } catch (e) {
+            document.getElementById('status').innerText = "❌ 데이터 로드 실패";
+        }
+    }
+
+    function renderTable(data) {
+        const tbody = document.getElementById('table-body');
+        tbody.innerHTML = data.map(row => {
+            const name = row["업소명"] || "이름없음";
+            const addr = row["주소"] || "주소없음";
+            const tel = row["전화번호"] || "-";
+            
+            // 💡 [수정] 위도, 경도 헤더를 직접 참조
+            const lat = parseFloat(row["위도"]);
+            const lng = parseFloat(row["경도"]);
+            
+            let distText = "";
+            if (userCoords && !isNaN(lat) && !isNaN(lng)) {
+                const dist = getDistance(userCoords.lat, userCoords.lng, lat, lng);
+                if (dist !== null) distText = `<span class="distance-info">📍 ${dist.toFixed(1)}km</span>`;
+            }
+
+            const area = addr.split(' ')[1] || "";
+            const searchQuery = encodeURIComponent(name + " " + area);
+            const naverMapUrl = `https://map.naver.com/v5/search/${searchQuery}`;
+
+            return `<tr>
+                <td><strong>${name}</strong>${distText}</td>
+                <td><small>${addr}</small></td>
+                <td>${tel}</td>
+                <td><a href="${naverMapUrl}" target="_blank" class="map-link">네이버지도</a></td>
+            </tr>`;
+        }).join('');
+    }
+
+    async function sortByDistance() {
+        if (!userCoords) await getUserLocation();
+        if (!userCoords) return;
+        const sorted = [...masterData].sort((a, b) => {
+            const distA = getDistance(userCoords.lat, userCoords.lng, parseFloat(a["위도"]), parseFloat(a["경도"])) || 9999;
+            const distB = getDistance(userCoords.lat, userCoords.lng, parseFloat(b["위도"]), parseFloat(b["경도"])) || 9999;
+            return distA - distB;
+        });
+        renderTable(sorted);
+    }
+
+    async function filterByRadius(km) {
+        if (!userCoords) await getUserLocation();
+        if (!userCoords) return;
+        const filtered = masterData.filter(row => {
+            const dist = getDistance(userCoords.lat, userCoords.lng, parseFloat(row["위도"]), parseFloat(row["경도"]));
+            return dist !== null && dist <= km;
+        });
+        renderTable(filtered);
+    }
+
+    function filterData() {
+        const val = document.getElementById('search-input').value.toLowerCase().trim();
+        const filtered = masterData.filter(row => 
+            (row["업소명"]||"").toLowerCase().includes(val) || (row["주소"]||"").toLowerCase().includes(val)
+        );
+        renderTable(filtered);
+    }
+
+    function resetList() { renderTable(masterData); }
+    loadData();
+</script>
+</body>
+</html>
