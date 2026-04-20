@@ -11,7 +11,7 @@ body { font-family: sans-serif; margin:0; background:#f5f5f5; }
 
 h1 { font-size:1.2rem; text-align:center; }
 
-/* 🔥 상단 고정 */
+/* 상단 고정 */
 .top-bar {
     position: sticky;
     top: 0;
@@ -88,6 +88,13 @@ const SIZE = 30;
 let user = null;
 
 
+// 🔥 지역명 정규화 (강원도 문제 해결)
+function normalize(text){
+    return text
+        .replace(/특별자치도|특별자치시|광역시|특별시|자치도|자치시/g,"");
+}
+
+
 // 거리 계산
 function dist(a,b,c,d){
     const R=6371;
@@ -99,7 +106,7 @@ function dist(a,b,c,d){
 }
 
 
-// 위치 가져오기
+// 위치
 function getLoc(){
     return new Promise(res=>{
         navigator.geolocation.getCurrentPosition(p=>{
@@ -113,7 +120,15 @@ function getLoc(){
 // 렌더
 function render(){
     const list=document.getElementById('list');
+    const loading=document.getElementById('loading');
+
     const slice=view.slice(page*SIZE,(page+1)*SIZE);
+
+    // 데이터 없음
+    if(page === 0 && view.length === 0){
+        loading.innerText = "❌ 검색 결과가 없습니다";
+        return;
+    }
 
     slice.forEach(r=>{
         const lat=parseFloat(r["위도"]);
@@ -140,13 +155,21 @@ function render(){
     });
 
     page++;
+
+    if(page*SIZE >= view.length){
+        loading.innerText = "✔ 모든 데이터를 불러왔습니다";
+    } else {
+        loading.innerText = "스크롤하면 더 불러옵니다...";
+    }
 }
 
 
 // 무한스크롤
 const observer=new IntersectionObserver(e=>{
     if(e[0].isIntersecting){
-        render();
+        if(page*SIZE < view.length){
+            render();
+        }
     }
 });
 observer.observe(document.getElementById('loading'));
@@ -154,44 +177,60 @@ observer.observe(document.getElementById('loading'));
 
 // 데이터 로드
 async function load(){
-    const res=await fetch(URL);
-    data=await res.json();
-    view=data;
+    try{
+        const res=await fetch(URL);
+        data=await res.json();
+        view=data;
 
-    document.getElementById('count').innerText=data.length;
+        document.getElementById('count').innerText=data.length;
 
-    await getLoc();
+        await getLoc();
 
-    render();
+        document.getElementById('loading').innerText="스크롤하면 더 불러옵니다...";
+        render();
+
+    }catch(e){
+        document.getElementById('loading').innerText="❌ 데이터 로드 실패";
+    }
 }
 load();
 
 
 // 검색
 function filter(){
-    const v=document.getElementById('search').value.toLowerCase();
+    const v=normalize(document.getElementById('search').value.toLowerCase());
 
-    view=data.filter(r=>
-        (r["업소명"]||"").toLowerCase().includes(v) ||
-        (r["주소"]||"").toLowerCase().includes(v)
-    );
+    view=data.filter(r=>{
+        const name=normalize((r["업소명"]||"").toLowerCase());
+        const addr=normalize((r["주소"]||"").toLowerCase());
+        return name.includes(v)||addr.includes(v);
+    });
 
     document.getElementById('list').innerHTML="";
     page=0;
+
     render();
 }
 
 
-// 전체 초기화
+// 엔터 검색
+document.getElementById('search')
+.addEventListener('keydown', e=>{
+    if(e.key==="Enter") filter();
+});
+
+
+// 초기화
 function reset(){
     view=data;
     document.getElementById('list').innerHTML="";
     page=0;
+    document.getElementById('loading').innerText="스크롤하면 더 불러옵니다...";
     render();
 }
 
 
-// 🔥 내 주변 5km + 거리순 정렬
+// 내 주변 5km
 async function nearby(){
     if(!user) await getLoc();
     if(!user) return;
@@ -211,6 +250,7 @@ async function nearby(){
 
     document.getElementById('list').innerHTML="";
     page=0;
+
     render();
 }
 
